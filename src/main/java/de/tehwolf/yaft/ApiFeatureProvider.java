@@ -66,6 +66,7 @@ public final class ApiFeatureProvider implements FeatureProvider {
 
     private static final System.Logger LOG = System.getLogger("de.tehwolf.yaft");
 
+    private final String keyPrefix;
     private final URI features;
     private final URI collectionHash;
     private final JsonDecoder json;
@@ -79,6 +80,7 @@ public final class ApiFeatureProvider implements FeatureProvider {
 
     private ApiFeatureProvider(Builder builder) {
         String base = builder.apiUrl.toString().replaceAll("/+$", "");
+        this.keyPrefix = builder.group + "|";
         this.features = URI.create(base + "/features/" + builder.group);
         this.collectionHash = URI.create(base + "/collectionHash/" + builder.group);
         this.json = builder.json;
@@ -151,9 +153,24 @@ public final class ApiFeatureProvider implements FeatureProvider {
         return data;
     }
 
+    /**
+     * Answers for a toggle of this group, by its name or by its full key.
+     *
+     * <p>The backend keys every toggle as {@code <group uuid>|<name>}. The UUID
+     * only exists at runtime, and an annotation value must be a compile-time
+     * constant, so {@code @FeatureToggle(key = "newCheckout")} could never
+     * name the full key. A key is therefore looked up as given first, and
+     * then as a name within this provider's group.
+     *
+     * @param key the toggle's name, or its full {@code uuid|name} key
+     * @return {@code true} if the toggle is on
+     */
     @Override
     public boolean isEnabled(String key) {
-        return Evaluation.evaluate(data.get(key), clock.instant());
+        if (key == null) return false;
+        Feature feature = data.get(key);
+        if (feature == null && !key.startsWith(keyPrefix)) feature = data.get(keyPrefix + key);
+        return Evaluation.evaluate(feature, clock.instant());
     }
 
     private Object get(URI uri) throws IOException, InterruptedException {

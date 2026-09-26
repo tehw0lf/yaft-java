@@ -108,6 +108,58 @@ class ApiFeatureProviderTest {
     }
 
     @Test
+    void answersByBareNameWithinItsGroup() throws Exception {
+        serve("h1", """
+                {"toggles": [
+                  {"key": "%1$s|newCheckout", "value": "true"},
+                  {"key": "%1$s|a|b", "value": "true"}
+                ]}""".formatted(GROUP));
+        ApiFeatureProvider provider = provider();
+        provider.refresh();
+
+        // An annotation value cannot contain the runtime UUID, so the name alone must work.
+        assertTrue(provider.isEnabled("newCheckout"));
+        assertTrue(provider.isEnabled(GROUP + "|newCheckout"));
+        // A name may itself contain the separator.
+        assertTrue(provider.isEnabled("a|b"));
+        // Another group's key is not this group's toggle.
+        assertFalse(provider.isEnabled("00000000-0000-0000-0000-000000000000|newCheckout"));
+        assertFalse(provider.isEnabled(null));
+    }
+
+    @Test
+    void worksWithFeatureToggleAnnotations() throws Exception {
+        serve("h1", """
+                {"toggles": [{"key": "%s|loud", "value": "true"}]}""".formatted(GROUP));
+        ApiFeatureProvider provider = provider();
+        provider.refresh();
+        FeatureProvider saved = YaFT.provider().orElse(null);
+        try {
+            YaFT.setProvider(provider);
+            assertEquals("HELLO", YaFT.create(Greeter.class, Loud.class).greet());
+        } finally {
+            YaFT.setProvider(saved);
+        }
+    }
+
+    interface Greeter {
+        String greet();
+    }
+
+    @FeatureToggle(key = "loud", fallback = Quiet.class)
+    static final class Loud implements Greeter {
+        public String greet() {
+            return "HELLO";
+        }
+    }
+
+    static final class Quiet implements Greeter {
+        public String greet() {
+            return "hello";
+        }
+    }
+
+    @Test
     void refetchesOnlyWhenTheHashChanges() throws Exception {
         serve("h1", "{\"toggles\": []}");
         ApiFeatureProvider provider = provider();
