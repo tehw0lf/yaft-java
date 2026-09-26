@@ -1,11 +1,11 @@
 package de.tehwolf.yaft;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.InstantSource;
@@ -13,6 +13,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A feature-shape provider that loads a toggle group from a YaFT backend.
@@ -158,21 +162,41 @@ public final class ApiFeatureProvider implements FeatureProvider {
                 .header("Accept", "application/json")
                 .GET()
                 .build();
-        HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
-        try (InputStream body = response.body()) {
-            if (response.statusCode() != 200) {
-                throw new IOException("GET " + uri + " answered " + response.statusCode());
-            }
-            // Read one byte past the limit to tell "exactly at the limit" from
-            // "over it" without trusting a Content-Length header.
-            byte[] bytes = body.readNBytes((int) Math.min(Integer.MAX_VALUE - 8, maxBodyBytes + 1));
-            if (bytes.length > maxBodyBytes) {
-                throw new IOException("GET " + uri + " sent more than " + maxBodyBytes + " bytes");
-            }
-            return json.decode(new String(bytes, StandardCharsets.UTF_8));
-        } catch (IOException e) {
+        // HttpRequest.timeout only bounds the wait for the headers. A server
+        // that sends them and then trickles or withholds the body would block
+        // a plain read forever -- and refresh() holds the lock meanwhile -- so
+        // the whole exchange, body included, runs against one deadline.
+        CompletableFuture<HttpResponse<byte[]>> exchange = client.sendAsync(
+                request, HttpResponse.BodyHandlers.limiting(HttpResponse.BodyHandlers.ofByteArray(), maxBodyBytes));
+        HttpResponse<byte[]> response;
+        try {
+            response = exchange.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException e) {
+            exchange.cancel(true);
+            throw new HttpTimeoutException("GET " + uri + " did not complete within " + timeout);
+        } catch (InterruptedException e) {
+            exchange.cancel(true);
             throw e;
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof IOException io) {
+                // BodyHandlers.limiting reports an oversized body by message
+                // only. Should that text change, the IOException still
+                // propagates, just less readably -- rejectsAnOversizedBody
+                // would flag it.
+                if (io.getMessage() != null && io.getMessage().contains("exceeds capacity")) {
+                    throw new IOException("GET " + uri + " sent more than " + maxBodyBytes + " bytes", io);
+                }
+                throw io;
+            }
+            throw new IOException("GET " + uri + " failed", e.getCause());
+        }
+
+        if (response.statusCode() != 200) {
+            throw new IOException("GET " + uri + " answered " + response.statusCode());
+        }
+        try {
+            return json.decode(new String(response.body(), StandardCharsets.UTF_8));
         } catch (Exception e) {
             throw new IOException("GET " + uri + " sent a body that does not parse", e);
         }
@@ -226,7 +250,8 @@ public final class ApiFeatureProvider implements FeatureProvider {
         }
 
         /**
-         * How long to wait for a connection and for each response. Default 5 seconds.
+         * How long one request may take, from connecting until the last byte
+         * of the body. Default 5 seconds.
          *
          * @param timeout the timeout, positive
          * @return this builder

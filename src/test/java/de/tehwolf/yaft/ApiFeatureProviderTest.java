@@ -42,6 +42,19 @@ class ApiFeatureProviderTest {
             String path = exchange.getRequestURI().getRawPath();
             hits.computeIfAbsent(path, p -> new AtomicInteger()).incrementAndGet();
             Object[] route = routes.getOrDefault(path, new Object[] {404, "{\"error\":\"Feature not found\"}"});
+            if (route[1] instanceof Stall stall) {
+                // Headers promise a body, a few bytes arrive, then nothing.
+                exchange.sendResponseHeaders(200, 1000);
+                exchange.getResponseBody().write("{\"collec".getBytes(StandardCharsets.UTF_8));
+                exchange.getResponseBody().flush();
+                try {
+                    Thread.sleep(stall.duration().toMillis());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                exchange.close();
+                return;
+            }
             if (route[1] instanceof Duration delay) {
                 try {
                     Thread.sleep(delay.toMillis());
@@ -192,6 +205,21 @@ class ApiFeatureProviderTest {
                 ApiFeatureProvider.builder(base, GROUP, DECODE).timeout(Duration.ofMillis(200)).build();
 
         assertThrows(IOException.class, provider::refresh);
+    }
+
+    /** A body that starts and then stalls must not outlast the timeout either. */
+    record Stall(Duration duration) {}
+
+    @Test
+    void timesOutOnABodyThatStalls() {
+        routes.put("/collectionHash/" + GROUP, new Object[] {200, new Stall(Duration.ofSeconds(5))});
+        ApiFeatureProvider provider =
+                ApiFeatureProvider.builder(base, GROUP, DECODE).timeout(Duration.ofMillis(300)).build();
+
+        long start = System.nanoTime();
+        assertThrows(IOException.class, provider::refresh);
+        long elapsed = Duration.ofNanos(System.nanoTime() - start).toMillis();
+        assertTrue(elapsed < 2000, "refresh took " + elapsed + " ms against a 300 ms timeout");
     }
 
     @Test
