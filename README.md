@@ -21,19 +21,20 @@ Requires Java 25.
 From Maven Central:
 
 ```kotlin
-implementation("de.tehwolf:yaft:0.2.2")
+implementation("de.tehwolf:yaft:0.2.3")
 ```
 
 ```xml
 <dependency>
   <groupId>de.tehwolf</groupId>
   <artifactId>yaft</artifactId>
-  <version>0.2.2</version>
+  <version>0.2.3</version>
 </dependency>
 ```
 
-Releases are signed with the key `2A0351C28EB122B8946E52E39A12B17723327580`
-(on keys.openpgp.org and keyserver.ubuntu.com).
+Releases are signed with the key `2A0351C28EB122B8946E52E39A12B17723327580`.
+Fetch it from keyserver.ubuntu.com to verify; the keys.openpgp.org copy carries
+no user ID, which gpg refuses to import.
 
 ## Initialization
 
@@ -82,6 +83,10 @@ YaFT.setProvider(provider);
 scheduler.scheduleWithFixedDelay(provider::refreshQuietly, 30, 30, TimeUnit.SECONDS);
 ```
 
+- Toggles are looked up by name within the group: `isEnabled("newCheckout")`
+  and `@FeatureToggle(key = "newCheckout")` both find `<uuid>|newCheckout`.
+  An annotation value has to be a compile-time constant, so it could never
+  contain the group's UUID. The full key works too.
 - `refresh()` asks `/collectionHash/{uuid}` first and fetches the group only
   when it changed.
 - Time bounds are evaluated locally against the clock, so a scheduled toggle
