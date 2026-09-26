@@ -22,6 +22,13 @@ final class Cases {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
+    /**
+     * The case-file format versions this adapter implements. A file in any
+     * other format may carry a field this adapter never reads, which would
+     * leave a rule silently unenforced, so it is rejected instead.
+     */
+    private static final Map<String, Integer> FORMATS = Map.of("evaluation", 1, "decorator", 1, "mapping", 2);
+
     private Cases() {}
 
     @SuppressWarnings("unchecked")
@@ -39,6 +46,10 @@ final class Cases {
         Map<String, Object> file = JSON.readValue(path.toFile(), Map.class);
         if (!suite.equals(file.get("suite"))) {
             throw new IllegalStateException(path + " declares suite \"" + file.get("suite") + "\", expected \"" + suite + "\"");
+        }
+        if (!FORMATS.get(suite).equals(file.get("version"))) {
+            throw new IllegalStateException(path + " is format version " + file.get("version") + ", but this adapter"
+                    + " implements version " + FORMATS.get(suite) + ". Extend the adapter to the new format.");
         }
         List<Map<String, Object>> cases = (List<Map<String, Object>>) file.get("cases");
         if (cases == null || cases.isEmpty()) {

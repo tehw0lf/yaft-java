@@ -1,7 +1,6 @@
 package de.tehwolf.yaft.conformance;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import de.tehwolf.yaft.Feature;
 import de.tehwolf.yaft.LocalBooleanProvider;
@@ -19,9 +18,6 @@ import org.junit.jupiter.api.TestFactory;
  */
 class MappingConformanceTest {
 
-    /** A key none of the cases uses, to check that a missing key is off (R21). */
-    private static final String ABSENT = "yaft-conformance-absent-key";
-
     @TestFactory
     Stream<DynamicTest> mapping() {
         return Cases.load("mapping").stream().map(c -> DynamicTest.dynamicTest(Cases.title(c), () -> {
@@ -35,12 +31,12 @@ class MappingConformanceTest {
                     assertEquals(expected, actual);
                 }
                 case "boolean" -> {
-                    // Checked through the provider rather than by comparing the
-                    // response with itself: what matters is what isEnabled says.
-                    LocalBooleanProvider provider = LocalBooleanProvider.fromResponse((Map<?, ?>) response);
+                    LocalBooleanProvider provider = LocalBooleanProvider.fromResponse(response);
                     assertEquals(expected, provider.data());
-                    expected.forEach((key, value) -> assertEquals(value, provider.isEnabled((String) key), (String) key));
-                    assertFalse(provider.isEnabled(ABSENT));
+                    // The probes include keys absent from the data, which a
+                    // comparison of the data alone cannot check (R21).
+                    Map<?, ?> probes = (Map<?, ?>) c.get("isEnabled");
+                    probes.forEach((key, value) -> assertEquals(value, provider.isEnabled((String) key), (String) key));
                 }
                 default -> throw Cases.unsupported("shape", c.get("shape"), c.get("name"));
             }

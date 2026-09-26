@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * Turns a backend response into provider data.
  *
- * <p>This is the single definition of YaFT's mapping rules (SPEC R22-R25), the
+ * <p>This is the single definition of YaFT's mapping rules (SPEC R22-R25, R29), the
  * way {@link Evaluation} is the single definition of the evaluation rules. It
  * works on the plain {@code Map}/{@code List}/{@code String} tree every JSON
  * library can produce, so the core does not depend on one.
@@ -78,6 +78,26 @@ public final class Mapping {
             Feature feature = normaliseFeature(raw);
             if (!feature.key().isEmpty()) data.put(feature.key(), feature);
         }
+        return Collections.unmodifiableMap(data);
+    }
+
+    /**
+     * Normalises a boolean-shape payload, {@code {"myToggle": true}}.
+     *
+     * <p>Only real booleans are kept (R29). Anything else -- {@code "true"},
+     * {@code "false"}, {@code 1}, {@code null} -- is dropped, so its key reads
+     * as missing and therefore off.
+     *
+     * @param response a parsed JSON object
+     * @return the boolean entries in response order; empty for anything unreadable
+     */
+    public static Map<String, Boolean> normaliseBooleans(Object response) {
+        if (!(response instanceof Map<?, ?> body)) return Map.of();
+
+        Map<String, Boolean> data = new LinkedHashMap<>();
+        body.forEach((key, value) -> {
+            if (key instanceof String k && value instanceof Boolean b) data.put(k, b);
+        });
         return Collections.unmodifiableMap(data);
     }
 

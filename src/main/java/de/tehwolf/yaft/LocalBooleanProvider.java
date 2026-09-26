@@ -29,17 +29,15 @@ public final class LocalBooleanProvider implements FeatureProvider {
 
     /**
      * Builds a provider from a parsed JSON object. Entries whose value is not a
-     * boolean are dropped, so a string {@code "true"} cannot switch anything on.
+     * boolean are dropped, so neither {@code "true"} nor {@code "false"} can
+     * switch anything on (R29).
      *
      * @param response the parsed JSON object
      * @return a provider over the boolean entries of {@code response}
+     * @see Mapping#normaliseBooleans(Object)
      */
-    public static LocalBooleanProvider fromResponse(Map<?, ?> response) {
-        Map<String, Boolean> data = new LinkedHashMap<>();
-        response.forEach((key, value) -> {
-            if (key instanceof String k && value instanceof Boolean b) data.put(k, b);
-        });
-        return new LocalBooleanProvider(data);
+    public static LocalBooleanProvider fromResponse(Object response) {
+        return new LocalBooleanProvider(Mapping.normaliseBooleans(response));
     }
 
     /**
