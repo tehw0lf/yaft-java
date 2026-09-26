@@ -21,7 +21,7 @@ Requires Java 25.
 Not published yet. Maven Central coordinates will be:
 
 ```kotlin
-implementation("de.tehwolf:yaft:0.1.2")
+implementation("de.tehwolf:yaft:0.2.0")
 ```
 
 ## Initialization
@@ -37,18 +37,55 @@ YaFT.setProvider(new LocalFeatureProvider(Map.of(
         "new-algorithm", new Feature("new-algorithm", "true"))));
 ```
 
-Two providers ship with the library, one per data shape:
+Three providers ship with the library:
 
 | Provider | Data | Time bounds |
 |---|---|---|
 | `LocalFeatureProvider` | full `Feature` records | yes — `activeAt`, `disabledAt` |
 | `LocalBooleanProvider` | `{"myToggle": true}` | none, by design |
+| `ApiFeatureProvider` | a group from the YaFT backend | yes, evaluated locally |
 
-Both take their data from a `Map`, or from any parsed JSON through
+The local ones take their data from a `Map`, or from any parsed JSON through
 `fromResponse(...)`. The core reads the plain `Map`/`List`/`String` tree that
 Jackson, Gson and friends all produce, so it does not pick a JSON library for
 you. `LocalFeatureProvider.fromResponse` accepts every envelope and field
 spelling the Go backend has ever sent.
+
+### From a YaFT backend
+
+`ApiFeatureProvider` loads a toggle group from the Go backend. It does not
+parse JSON itself: you hand it a decoder, normally your application's own
+Jackson or Gson instance, so the library adds no dependency that could clash
+with yours and contains no hand-written parser.
+
+```java
+ObjectMapper mapper = new ObjectMapper();
+ApiFeatureProvider provider = ApiFeatureProvider
+        .builder(URI.create("https://yaft.tehwolf.de"), groupUuid,
+                 body -> mapper.readValue(body, Object.class))
+        .build();
+
+provider.refresh();          // throws if the backend cannot be read
+YaFT.setProvider(provider);
+
+scheduler.scheduleWithFixedDelay(provider::refreshQuietly, 30, 30, TimeUnit.SECONDS);
+```
+
+- `refresh()` asks `/collectionHash/{uuid}` first and fetches the group only
+  when it changed.
+- Time bounds are evaluated locally against the clock, so a scheduled toggle
+  flips at its exact instant, not when the backend's cron job runs.
+- A failed refresh throws (`refreshQuietly()` logs instead) and **keeps the
+  previous data**: a backend outage does not switch everything off. Before the
+  first successful refresh every feature is off.
+- The group UUID is checked strictly before it goes into the URL; only `http`
+  and `https` are accepted, redirects are not followed, requests time out after
+  5 seconds and bodies over 1 MiB are rejected. `timeout`, `maxBodyBytes`,
+  `client` and `clock` on the builder change these.
+
+Reading needs no secret. Writing toggles is not part of the library.
+
+### Your own provider
 
 `FeatureProvider` is a single-method interface, so anything that can answer
 `isEnabled(key)` is a provider:
