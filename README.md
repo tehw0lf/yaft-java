@@ -198,6 +198,25 @@ wrong type or no constructor, a toggle on a method the interface cannot reach â€
 is rejected with an `IllegalArgumentException` when you decorate, not when
 the toggle first goes off in production.
 
+### Spring and other proxies
+
+Wrap the object **before** a framework proxies it, and let the framework
+advise the YaFT proxy:
+
+```java
+@Bean
+Processing processing() {
+    return YaFT.wrap(Processing.class, new Service());   // Spring may advise this
+}
+```
+
+The other way round cannot work: a Spring (CGLIB or JDK) proxy's class carries
+none of your annotations, and a fallback method would run on the proxy
+instance, whose fields are empty. `YaFT.wrap` therefore refuses a JDK proxy,
+and any object whose toggled method is overridden without the annotation,
+instead of silently ignoring the toggle. Both directions are exercised against
+real Spring proxies in [yaft-java-playground](https://github.com/tehw0lf/yaft-java-playground).
+
 ### Modules
 
 On the class path nothing is needed. In a named module, open the packages

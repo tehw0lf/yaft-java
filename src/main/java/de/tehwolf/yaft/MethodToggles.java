@@ -47,6 +47,14 @@ final class MethodToggles implements InvocationHandler {
      */
     static <I> I wrap(Class<I> type, I target) {
         Class<?> implementation = target.getClass();
+        // Found with yaft-java-playground: wrapping a bean that Spring had
+        // already proxied left every toggle silently on, because the proxy
+        // class carries none of the annotations. The same holds for any JDK
+        // proxy, so it is refused rather than wrapped blind.
+        if (Proxy.isProxyClass(implementation)) {
+            throw new IllegalArgumentException(implementation.getName() + " is a JDK proxy, and YaFT cannot see"
+                    + " the annotations of the object behind it. " + WRAP_FIRST);
+        }
         Map<Method, Route> routes = new HashMap<>();
         boolean toggled = false;
 
@@ -56,6 +64,7 @@ final class MethodToggles implements InvocationHandler {
 
             Method original = findMethod(implementation, method.getName(), method.getParameterTypes());
             FeatureToggle toggle = original != null ? original.getAnnotation(FeatureToggle.class) : null;
+            if (original != null && toggle == null) rejectShadowedToggle(original);
             if (toggle == null) toggle = method.getAnnotation(FeatureToggle.class);
 
             if (toggle == null) {
@@ -132,6 +141,32 @@ final class MethodToggles implements InvocationHandler {
     private static boolean returns(Class<?> expected, Class<?> actual) {
         if (expected.isPrimitive() || actual.isPrimitive()) return expected == actual;
         return expected.isAssignableFrom(actual);
+    }
+
+    private static final String WRAP_FIRST = "Wrap the object itself, before another framework proxies it"
+            + " -- with Spring, call YaFT.wrap in the @Bean method; Spring can then advise the YaFT proxy.";
+
+    /**
+     * A toggle declared on a superclass method but overridden without the
+     * annotation would be silently dropped. That is exactly what a generated
+     * subclass proxy (Spring CGLIB, Hibernate, ByteBuddy) looks like -- and
+     * even if YaFT used the superclass annotation, a fallback would run on the
+     * proxy instance, whose fields are empty, instead of on the real object.
+     */
+    private static void rejectShadowedToggle(Method override) {
+        for (Class<?> c = override.getDeclaringClass().getSuperclass(); c != null; c = c.getSuperclass()) {
+            try {
+                Method hidden = c.getDeclaredMethod(override.getName(), override.getParameterTypes());
+                if (hidden.isAnnotationPresent(FeatureToggle.class)) {
+                    throw new IllegalArgumentException("@FeatureToggle on " + c.getName() + "." + hidden.getName()
+                            + " is hidden by " + override.getDeclaringClass().getName() + "." + override.getName()
+                            + ", which overrides it without the annotation. If that class is a generated proxy: "
+                            + WRAP_FIRST + " Otherwise repeat the annotation on the override.");
+                }
+            } catch (NoSuchMethodException e) {
+                // not declared here; keep looking
+            }
+        }
     }
 
     /**

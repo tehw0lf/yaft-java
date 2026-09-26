@@ -427,6 +427,34 @@ class YaFTTest {
             assertRejected(() -> YaFT.decorate(Plain.class, NotAnnotated.class), "not annotated");
         }
 
+        /** What Spring's CGLIB proxy of a toggled bean looks like: a subclass overriding without the annotation. */
+        static class ProxiedLikeCglib extends ToggledPlain {
+            @Override
+            public String run(String input) {
+                return super.run(input);
+            }
+        }
+
+        static class ToggledPlain implements Plain {
+            @Override
+            @FeatureToggle(key = "k")
+            public String run(String input) {
+                return input;
+            }
+        }
+
+        @Test
+        void aToggleHiddenByAnOverrideAsInASubclassProxy() {
+            assertRejected(() -> YaFT.wrap(Plain.class, new ProxiedLikeCglib()), "hidden by");
+        }
+
+        @Test
+        void aJdkProxy() {
+            Plain proxy = (Plain) java.lang.reflect.Proxy.newProxyInstance(
+                    Plain.class.getClassLoader(), new Class<?>[] {Plain.class}, (p, m, a) -> "x");
+            assertRejected(() -> YaFT.wrap(Plain.class, proxy), "JDK proxy");
+        }
+
         @Test
         @SuppressWarnings({"unchecked", "rawtypes"})
         void aTypeThatIsNotAnInterface() {
