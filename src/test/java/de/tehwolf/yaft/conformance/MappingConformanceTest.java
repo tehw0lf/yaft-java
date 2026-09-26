@@ -31,7 +31,7 @@ class MappingConformanceTest {
                     assertEquals(expected, actual);
                 }
                 case "boolean" -> {
-                    LocalBooleanProvider provider = LocalBooleanProvider.fromResponse((Map<?, ?>) response);
+                    LocalBooleanProvider provider = LocalBooleanProvider.fromResponse(response);
                     assertEquals(expected, provider.data());
                     // The probes include keys absent from the data, which a
                     // comparison of the data alone cannot check (R21).
