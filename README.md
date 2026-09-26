@@ -21,7 +21,7 @@ Requires Java 25.
 Not published yet. Maven Central coordinates will be:
 
 ```kotlin
-implementation("de.tehwolf:yaft:0.1.1")
+implementation("de.tehwolf:yaft:0.1.2")
 ```
 
 ## Initialization
