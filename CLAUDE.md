@@ -30,8 +30,8 @@ the two disagree the spec wins.
 ## Pre-commit validation
 
 ```bash
-JAVA_HOME=/usr/lib/jvm/java-25-openjdk ./gradlew build
+./gradlew build
 ```
 
-Exit code 0 required. The system default JDK may be newer than 25; the
-toolchain picks 25 either way, but Gradle itself needs a JDK it supports.
+Exit code 0 required. Gradle may run on a newer JDK; the toolchain compiles
+and tests with the installed JDK 25 either way.
