@@ -18,11 +18,22 @@ Requires Java 25.
 
 ## Installation
 
-Not published yet. Maven Central coordinates will be:
+From Maven Central:
 
 ```kotlin
-implementation("de.tehwolf:yaft:0.2.1")
+implementation("de.tehwolf:yaft:0.2.2")
 ```
+
+```xml
+<dependency>
+  <groupId>de.tehwolf</groupId>
+  <artifactId>yaft</artifactId>
+  <version>0.2.2</version>
+</dependency>
+```
+
+Releases are signed with the key `2A0351C28EB122B8946E52E39A12B17723327580`
+(on keys.openpgp.org and keyserver.ubuntu.com).
 
 ## Initialization
 
