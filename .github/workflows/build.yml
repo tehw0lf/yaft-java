@@ -27,3 +27,13 @@ jobs:
       # assemble builds the javadoc jar too, so a doclint error fails here.
       build_branch: assemble
       build_main: assemble
+      # Maven Central, via publish-maven-central.yml. Dry run first: signs
+      # with the real key and publishes to Maven Local only. Set to false to
+      # upload.
+      publish_maven_central: true
+      maven_central_dry_run: true
+    secrets:
+      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
