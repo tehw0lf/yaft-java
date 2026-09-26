@@ -8,7 +8,9 @@ the two disagree the spec wins.
 
 - `src/main/java/de/tehwolf/yaft/`
   - `Evaluation` — the single definition of the time logic (R3–R13)
-  - `Mapping` — backend response normalisation (R22–R25)
+  - `Mapping` — backend response normalisation (R22–R25, R29)
+  - `ApiFeatureProvider` — reads a group over `java.net.http`; JSON parsing is
+    injected (`JsonDecoder`), never hand-written — a deliberate security call
   - `YaFT` — `decorate`/`create` (class, evaluated once, R14) and `wrap`
     (method, evaluated per call, R15) over JDK dynamic proxies
   - `MethodToggles`, `EmptyShell`, `Nothing` — package-private proxy internals
@@ -19,7 +21,8 @@ the two disagree the spec wins.
 
 ## Constraints
 
-- No runtime dependencies. Jackson is a test dependency for reading cases only.
+- No runtime dependencies. Jackson is a test dependency only (cases, and the
+  decoder in the API provider tests).
 - Java 25 toolchain, no auto-provisioning. CI gets the JDK through the
   `java_version` input of `tehw0lf/workflows`.
 - Compiler runs with `-Xlint:all -Werror`, javadoc with doclint `-Werror`.
