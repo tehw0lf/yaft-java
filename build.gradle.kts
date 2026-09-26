@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    alias(libs.plugins.maven.publish)
 }
 
 java {
@@ -8,8 +9,6 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
     }
-    withSourcesJar()
-    withJavadocJar()
 }
 
 repositories {
@@ -32,6 +31,48 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.javadoc {
     (options as StandardJavadocDocletOptions).addBooleanOption("Xdoclint:all", true)
     (options as StandardJavadocDocletOptions).addBooleanOption("Werror", true)
+}
+
+// Sources and javadoc jars come from the publish plugin, which Maven Central
+// requires. Signing and upload credentials are read from ORG_GRADLE_PROJECT_*
+// variables in CI (tehw0lf/workflows publish-maven-central.yml) and never
+// stored here.
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = true)
+    // Signed whenever a key is present, which CI always provides (the
+    // workflow refuses to run without one, and Central rejects unsigned
+    // bundles). Without a key, publishToMavenLocal still works, so a
+    // playground can build against an unreleased version.
+    if (providers.gradleProperty("signingInMemoryKey").isPresent) {
+        signAllPublications()
+    }
+
+    pom {
+        name = "YaFT for Java"
+        description = "Yet another Feature Toggle: feature toggles for classes and methods, " +
+            "conformant with yaft-conformance."
+        url = "https://github.com/tehw0lf/yaft-java"
+        inceptionYear = "2026"
+        licenses {
+            license {
+                name = "MIT License"
+                url = "https://opensource.org/licenses/MIT"
+                distribution = "repo"
+            }
+        }
+        developers {
+            developer {
+                id = "tehw0lf"
+                name = "Robert Weyres"
+                url = "https://github.com/tehw0lf"
+            }
+        }
+        scm {
+            url = "https://github.com/tehw0lf/yaft-java"
+            connection = "scm:git:https://github.com/tehw0lf/yaft-java.git"
+            developerConnection = "scm:git:ssh://git@github.com/tehw0lf/yaft-java.git"
+        }
+    }
 }
 
 tasks.jar {

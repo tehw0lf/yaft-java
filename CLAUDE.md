@@ -29,6 +29,10 @@ the two disagree the spec wins.
 - Gradle version bumps: `./gradlew wrapper --gradle-version X
   --gradle-distribution-sha256-sum <sum>` — always with the checksum.
 - The version lives in `gradle.properties`; bump the patch on every PR.
+- Publishing: `com.vanniktech.maven.publish` (resolved from Maven Central, see
+  `settings.gradle.kts`), driven by `publish-maven-central.yml` in
+  `tehw0lf/workflows`. Signing happens only when `signingInMemoryKey` is set,
+  so `./gradlew publishToMavenLocal` works without a key for local consumers.
 
 ## Pre-commit validation
 
