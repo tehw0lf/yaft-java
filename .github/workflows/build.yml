@@ -16,6 +16,9 @@ jobs:
       contents: write
       packages: write
       security-events: write
+      # security-scan-source calls npm-audit-autofix, which requests it; a
+      # missing scope is a startup_failure before any job runs.
+      pull-requests: write
     with:
       tool: ./gradlew
       java_version: "25"
