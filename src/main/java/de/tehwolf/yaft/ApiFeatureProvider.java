@@ -47,9 +47,14 @@ import java.util.concurrent.TimeoutException;
  * feature is off. A failed refresh throws and keeps the data from the last
  * successful one, so a backend outage does not switch everything off.
  *
+ * <p>{@link #close()} releases the HTTP client the provider created itself; a
+ * client passed to {@link Builder#client} belongs to the caller and stays
+ * open. A long-lived provider need not be closed, one per request or test
+ * should be.
+ *
  * <p>Thread-safe.
  */
-public final class ApiFeatureProvider implements FeatureProvider {
+public final class ApiFeatureProvider implements FeatureProvider, AutoCloseable {
 
     /** Parses a response body into the {@code Map}/{@code List}/{@code String} tree JSON libraries produce. */
     @FunctionalInterface
@@ -72,6 +77,7 @@ public final class ApiFeatureProvider implements FeatureProvider {
     private final URI collectionHash;
     private final JsonDecoder json;
     private final HttpClient client;
+    private final boolean ownsClient;
     private final Duration timeout;
     private final long maxBodyBytes;
     private final InstantSource clock;
@@ -91,6 +97,7 @@ public final class ApiFeatureProvider implements FeatureProvider {
                         .connectTimeout(builder.timeout)
                         .followRedirects(HttpClient.Redirect.NEVER)
                         .build();
+        this.ownsClient = builder.client == null;
         this.timeout = builder.timeout;
         this.maxBodyBytes = builder.maxBodyBytes;
         this.clock = builder.clock;
@@ -198,6 +205,16 @@ public final class ApiFeatureProvider implements FeatureProvider {
         Feature feature = data.get(key);
         if (feature == null && !key.startsWith(keyPrefix)) feature = data.get(keyPrefix + key);
         return Evaluation.evaluate(feature, clock.instant());
+    }
+
+    /**
+     * Releases the HTTP client this provider created. A client passed to
+     * {@link Builder#client} is left open. The data of the last refresh stays
+     * readable; a later {@link #refresh()} fails.
+     */
+    @Override
+    public void close() {
+        if (ownsClient) client.close();
     }
 
     private Object get(URI uri) throws IOException, InterruptedException {

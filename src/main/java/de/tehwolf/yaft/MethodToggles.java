@@ -7,6 +7,8 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -33,6 +35,13 @@ final class MethodToggles implements InvocationHandler {
      */
     private record Route(Method method, String key, Method fallback) {}
 
+    /** A method by name and parameter types, the part of a signature an override keeps. */
+    private record Signature(String name, List<Class<?>> parameterTypes) {
+        static Signature of(Method method) {
+            return new Signature(method.getName(), List.of(method.getParameterTypes()));
+        }
+    }
+
     private final Object target;
     private final Map<Method, Route> routes;
 
@@ -56,6 +65,7 @@ final class MethodToggles implements InvocationHandler {
                     + " the annotations of the object behind it. " + WRAP_FIRST);
         }
         Map<Method, Route> routes = new HashMap<>();
+        Set<Signature> reachable = new HashSet<>();
         boolean toggled = false;
 
         for (Method method : type.getMethods()) {
@@ -63,6 +73,10 @@ final class MethodToggles implements InvocationHandler {
             makeAccessible(method);
 
             Method original = findMethod(implementation, method.getName(), method.getParameterTypes());
+            if (original != null) {
+                original = bridged(original);
+                reachable.add(Signature.of(original));
+            }
             FeatureToggle toggle = original != null ? original.getAnnotation(FeatureToggle.class) : null;
             if (original != null && toggle == null) rejectShadowedToggle(original);
             if (toggle == null) toggle = method.getAnnotation(FeatureToggle.class);
@@ -72,10 +86,16 @@ final class MethodToggles implements InvocationHandler {
                 continue;
             }
             toggled = true;
-            routes.put(method, new Route(method, toggle.key(), fallbackFor(method, toggle, implementation)));
+            // The fallback lives in the implementation, so it is looked up by
+            // the implementation's parameter types: for a generic interface
+            // the interface method has erased ones (save(Object) for the
+            // save(String) that was annotated).
+            Class<?>[] parameterTypes = (original != null ? original : method).getParameterTypes();
+            routes.put(method, new Route(method, toggle.key(),
+                    fallbackFor(method, parameterTypes, toggle, implementation)));
         }
 
-        rejectUnreachableToggles(type, implementation);
+        rejectUnreachableToggles(type, implementation, reachable);
 
         if (!toggled) return target;
         return type.cast(Proxy.newProxyInstance(
@@ -109,7 +129,8 @@ final class MethodToggles implements InvocationHandler {
         }
     }
 
-    private static Method fallbackFor(Method method, FeatureToggle toggle, Class<?> implementation) {
+    private static Method fallbackFor(
+            Method method, Class<?>[] parameterTypes, FeatureToggle toggle, Class<?> implementation) {
         String where = implementation.getName() + "." + method.getName();
         if (toggle.fallback() != void.class) {
             throw new IllegalArgumentException(
@@ -117,12 +138,10 @@ final class MethodToggles implements InvocationHandler {
         }
         if (toggle.fallbackMethod().isEmpty()) return null;
 
-        Method fallback = findMethod(implementation, toggle.fallbackMethod(), method.getParameterTypes());
+        Method fallback = findMethod(implementation, toggle.fallbackMethod(), parameterTypes);
         if (fallback == null) {
             throw new IllegalArgumentException("Fallback method " + toggle.fallbackMethod()
-                    + Arrays.stream(method.getParameterTypes()).map(Class::getSimpleName)
-                            .collect(Collectors.joining(", ", "(", ")"))
-                    + " for " + where + " not found; it needs the same parameter types");
+                    + describe(parameterTypes) + " for " + where + " not found; it needs the same parameter types");
         }
         if (Modifier.isStatic(fallback.getModifiers())) {
             throw new IllegalArgumentException(
@@ -173,17 +192,56 @@ final class MethodToggles implements InvocationHandler {
      * An annotation on a method the interface does not have can never take
      * effect, because the proxy only sees interface calls. Silently ignoring
      * it would leave a feature permanently on.
+     *
+     * <p>Compared by name <em>and</em> parameter types: an annotated overload
+     * that shares only its name with an interface method is just as
+     * unreachable. Bridge methods are skipped; javac copies the annotation
+     * onto them, and the method they stand for is the one checked.
      */
-    private static void rejectUnreachableToggles(Class<?> type, Class<?> implementation) {
-        Set<String> names = Arrays.stream(type.getMethods()).map(Method::getName).collect(Collectors.toSet());
+    private static void rejectUnreachableToggles(Class<?> type, Class<?> implementation, Set<Signature> reachable) {
         for (Class<?> c = implementation; c != null && c != Object.class; c = c.getSuperclass()) {
             for (Method method : c.getDeclaredMethods()) {
-                if (method.isAnnotationPresent(FeatureToggle.class) && !names.contains(method.getName())) {
+                if (method.isBridge() || !method.isAnnotationPresent(FeatureToggle.class)) continue;
+                if (!reachable.contains(Signature.of(method))) {
                     throw new IllegalArgumentException("@FeatureToggle on " + c.getName() + "." + method.getName()
-                            + " has no effect: " + type.getName() + " has no such method");
+                            + describe(method.getParameterTypes()) + " has no effect: " + type.getName()
+                            + " has no such method");
                 }
             }
         }
+    }
+
+    /**
+     * The method a compiler-generated bridge stands for, or {@code method}
+     * itself. A class implementing {@code Store<String>} gets a bridge
+     * {@code save(Object)} that calls the {@code save(String)} it declares;
+     * the proxy finds the bridge, but the annotation and the fallback belong
+     * to the declared method.
+     */
+    private static Method bridged(Method method) {
+        if (!method.isBridge()) return method;
+        Method target = null;
+        for (Method candidate : method.getDeclaringClass().getDeclaredMethods()) {
+            if (candidate.isBridge() || !candidate.getName().equals(method.getName())) continue;
+            if (!overridesErased(candidate, method)) continue;
+            if (target != null) return method; // ambiguous: keep what the proxy calls
+            target = candidate;
+        }
+        return target != null ? target : method;
+    }
+
+    private static boolean overridesErased(Method candidate, Method bridge) {
+        Class<?>[] specific = candidate.getParameterTypes();
+        Class<?>[] erased = bridge.getParameterTypes();
+        if (specific.length != erased.length) return false;
+        for (int i = 0; i < specific.length; i++) {
+            if (!erased[i].isAssignableFrom(specific[i])) return false;
+        }
+        return bridge.getReturnType().isAssignableFrom(candidate.getReturnType());
+    }
+
+    private static String describe(Class<?>[] parameterTypes) {
+        return Arrays.stream(parameterTypes).map(Class::getSimpleName).collect(Collectors.joining(", ", "(", ")"));
     }
 
     /** Looks through the class hierarchy, so private and inherited methods are found too. */

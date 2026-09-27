@@ -170,8 +170,36 @@ class YaFTTest {
         }
     }
 
+    interface Store<T> {
+        String save(T item);
+    }
+
+    static final class ToggledStore implements Store<String> {
+        @Override
+        @FeatureToggle(key = "store", fallbackMethod = "saveOld")
+        public String save(String item) {
+            return "new " + item;
+        }
+
+        private String saveOld(String item) {
+            return "old " + item;
+        }
+    }
+
     @Nested
     class Wrap {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void findsTheFallbackOfAGenericMethodByTheImplementationsParameterTypes() {
+            // The interface method is save(Object) after erasure; the fallback
+            // is written against the implementation's save(String).
+            Store<String> store = YaFT.wrap(Store.class, new ToggledStore());
+
+            assertEquals("old x", store.save("x"));
+            enabled.add("store");
+            assertEquals("new x", store.save("x"));
+        }
 
         @Test
         void callsAPrivateFallbackOnTheSameInstance() {
@@ -343,6 +371,18 @@ class YaFTTest {
             }
         }
 
+        static final class UnreachableOverload implements Plain {
+            @Override
+            public String run(String input) {
+                return input;
+            }
+
+            @FeatureToggle(key = "k")
+            String run(int input) {
+                return Integer.toString(input);
+            }
+        }
+
         @FeatureToggle(key = "k", fallbackMethod = "other")
         static final class MethodFallbackOnClass implements Plain {
             public String run(String input) {
@@ -405,6 +445,13 @@ class YaFTTest {
         }
 
         @Test
+        void aToggledOverloadTheInterfaceDoesNotHave() {
+            // Same name as an interface method, other parameters: the proxy
+            // never routes to it, so it is as unreachable as a helper.
+            assertRejected(() -> YaFT.wrap(Plain.class, new UnreachableOverload()), "has no effect");
+        }
+
+        @Test
         void aMethodFallbackOnAClass() {
             assertRejected(() -> YaFT.decorate(Plain.class, MethodFallbackOnClass.class), "use fallback");
         }
@@ -446,6 +493,23 @@ class YaFTTest {
         @Test
         void aToggleHiddenByAnOverrideAsInASubclassProxy() {
             assertRejected(() -> YaFT.wrap(Plain.class, new ProxiedLikeCglib()), "hidden by");
+        }
+
+        static final class Reannotated extends ToggledPlain {
+            @Override
+            @FeatureToggle(key = "k")
+            public String run(String input) {
+                return "sub " + input;
+            }
+        }
+
+        @Test
+        void acceptsAnOverrideThatRepeatsTheAnnotation() {
+            // The superclass method is annotated and not the one the proxy
+            // calls, but it is overridden, not unreachable.
+            Plain plain = YaFT.wrap(Plain.class, new Reannotated());
+            enabled.add("k");
+            assertEquals("sub x", plain.run("x"));
         }
 
         @Test
