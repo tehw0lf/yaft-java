@@ -21,14 +21,14 @@ Requires Java 25.
 From Maven Central:
 
 ```kotlin
-implementation("de.tehwolf:yaft:0.2.3")
+implementation("de.tehwolf:yaft:0.2.4")
 ```
 
 ```xml
 <dependency>
   <groupId>de.tehwolf</groupId>
   <artifactId>yaft</artifactId>
-  <version>0.2.3</version>
+  <version>0.2.4</version>
 </dependency>
 ```
 
@@ -92,7 +92,8 @@ scheduler.scheduleWithFixedDelay(provider::refreshQuietly, 30, 30, TimeUnit.SECO
 - Time bounds are evaluated locally against the clock, so a scheduled toggle
   flips at its exact instant, not when the backend's cron job runs.
 - A failed refresh throws (`refreshQuietly()` logs instead) and **keeps the
-  previous data**: a backend outage does not switch everything off. Before the
+  previous data**: a backend outage does not switch everything off. So does a
+  `200` whose body is not a toggle group, such as a proxy's error page. Before the
   first successful refresh every feature is off.
 - The group UUID is checked strictly before it goes into the URL; only `http`
   and `https` are accepted, redirects are not followed, requests time out after

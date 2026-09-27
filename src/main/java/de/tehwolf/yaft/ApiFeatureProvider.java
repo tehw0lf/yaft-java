@@ -9,6 +9,7 @@ import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.InstantSource;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -121,9 +122,35 @@ public final class ApiFeatureProvider implements FeatureProvider {
         String current = hashOf(get(collectionHash));
         if (current.equals(hash)) return false;
 
-        data = Mapping.normaliseCollection(get(features));
+        data = groupFrom(get(features));
         hash = current;
         return true;
+    }
+
+    /**
+     * Accepts a {@code /features} body only if it is recognisably a group: a
+     * collection envelope, even an empty one, or a single toggle. Anything
+     * else -- null, an array, a proxy's error object, a collection whose
+     * entries are all unusable -- would normalise to nothing, and storing
+     * that would switch every feature off without an error, while the
+     * recorded hash kept it that way. Individual unusable entries next to
+     * good ones are still skipped (R25).
+     */
+    private Map<String, Feature> groupFrom(Object response) throws IOException {
+        if (!(response instanceof Map<?, ?> body)) {
+            throw new IOException("GET " + features + " sent a body that is not a JSON object");
+        }
+        Map<String, Feature> group = Mapping.normaliseCollection(body);
+        if (!group.isEmpty()) return group;
+
+        Object collection = body.get("toggles") instanceof List<?> ? body.get("toggles") : body.get("value");
+        if (!(collection instanceof List<?> entries)) {
+            throw new IOException("GET " + features + " sent a body that holds no toggles");
+        }
+        if (!entries.isEmpty()) {
+            throw new IOException("GET " + features + " sent " + entries.size() + " entries, none a usable toggle");
+        }
+        return group;
     }
 
     /**
