@@ -208,9 +208,10 @@ public final class ApiFeatureProvider implements FeatureProvider, AutoCloseable 
     }
 
     /**
-     * Releases the HTTP client this provider created. A client passed to
-     * {@link Builder#client} is left open. The data of the last refresh stays
-     * readable; a later {@link #refresh()} fails.
+     * Releases the HTTP client this provider created; a later {@link
+     * #refresh()} then fails. A client passed to {@link Builder#client} is
+     * left open, and refreshing through it keeps working. Either way the data
+     * of the last refresh stays readable.
      */
     @Override
     public void close() {

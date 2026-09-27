@@ -21,14 +21,14 @@ Requires Java 25.
 From Maven Central:
 
 ```kotlin
-implementation("de.tehwolf:yaft:0.2.4")
+implementation("de.tehwolf:yaft:0.2.5")
 ```
 
 ```xml
 <dependency>
   <groupId>de.tehwolf</groupId>
   <artifactId>yaft</artifactId>
-  <version>0.2.4</version>
+  <version>0.2.5</version>
 </dependency>
 ```
 

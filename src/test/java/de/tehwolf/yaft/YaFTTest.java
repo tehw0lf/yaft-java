@@ -186,8 +186,59 @@ class YaFTTest {
         }
     }
 
+    static class StoreBase {
+        @FeatureToggle(key = "store", fallbackMethod = "saveOld")
+        public String save(String item) {
+            return "new " + item;
+        }
+
+        String saveOld(String item) {
+            return "old " + item;
+        }
+    }
+
+    /** Declares only the bridge save(Object); save(String) is inherited. */
+    static final class InheritedStore extends StoreBase implements Store<String> {}
+
+    static final class OverloadedStore implements Store<String> {
+        @Override
+        @FeatureToggle(key = "store", fallbackMethod = "saveOld")
+        public String save(String item) {
+            return "new " + item;
+        }
+
+        /** Also fits the erased save(Object), but is not what the bridge calls. */
+        public String save(Integer item) {
+            return "int " + item;
+        }
+
+        private String saveOld(String item) {
+            return "old " + item;
+        }
+    }
+
     @Nested
     class Wrap {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void resolvesAGenericMethodInheritedFromASuperclass() {
+            Store<String> store = YaFT.wrap(Store.class, new InheritedStore());
+
+            assertEquals("old x", store.save("x"));
+            enabled.add("store");
+            assertEquals("new x", store.save("x"));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void resolvesAGenericMethodNextToAnOverloadTheErasureAlsoFits() {
+            Store<String> store = YaFT.wrap(Store.class, new OverloadedStore());
+
+            assertEquals("old x", store.save("x"));
+            enabled.add("store");
+            assertEquals("new x", store.save("x"));
+        }
 
         @Test
         @SuppressWarnings("unchecked")

@@ -1,10 +1,14 @@
 package de.tehwolf.yaft;
 
+import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Proxy;
+import java.lang.reflect.Type;
+import java.lang.reflect.TypeVariable;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -72,11 +76,8 @@ final class MethodToggles implements InvocationHandler {
             if (Modifier.isStatic(method.getModifiers())) continue;
             makeAccessible(method);
 
-            Method original = findMethod(implementation, method.getName(), method.getParameterTypes());
-            if (original != null) {
-                original = bridged(original);
-                reachable.add(Signature.of(original));
-            }
+            Method original = implementationOf(method, implementation);
+            if (original != null) reachable.add(Signature.of(original));
             FeatureToggle toggle = original != null ? original.getAnnotation(FeatureToggle.class) : null;
             if (original != null && toggle == null) rejectShadowedToggle(original);
             if (toggle == null) toggle = method.getAnnotation(FeatureToggle.class);
@@ -212,32 +213,69 @@ final class MethodToggles implements InvocationHandler {
     }
 
     /**
-     * The method a compiler-generated bridge stands for, or {@code method}
-     * itself. A class implementing {@code Store<String>} gets a bridge
-     * {@code save(Object)} that calls the {@code save(String)} it declares;
-     * the proxy finds the bridge, but the annotation and the fallback belong
-     * to the declared method.
+     * The implementation's method behind an interface method.
+     *
+     * <p>For a generic interface, the interface method has erased parameter
+     * types -- {@code Store<T>.save(T)} is {@code save(Object)} -- while the
+     * annotated method is {@code save(String)}, reached only through a
+     * compiler-generated bridge. So the type variables are first resolved
+     * against the implementation's supertypes, and that method is looked up
+     * through the whole class hierarchy: it may be inherited, and there may be
+     * other overloads the erased types would also fit. Only if that finds
+     * nothing is the method looked up by its erased types.
      */
-    private static Method bridged(Method method) {
-        if (!method.isBridge()) return method;
-        Method target = null;
-        for (Method candidate : method.getDeclaringClass().getDeclaredMethods()) {
-            if (candidate.isBridge() || !candidate.getName().equals(method.getName())) continue;
-            if (!overridesErased(candidate, method)) continue;
-            if (target != null) return method; // ambiguous: keep what the proxy calls
-            target = candidate;
+    private static Method implementationOf(Method method, Class<?> implementation) {
+        Map<TypeVariable<?>, Type> bindings = new HashMap<>();
+        collectBindings(implementation, bindings, new HashSet<>());
+
+        Type[] generic = method.getGenericParameterTypes();
+        Class<?>[] erased = method.getParameterTypes();
+        Class<?>[] resolved = new Class<?>[erased.length];
+        for (int i = 0; i < erased.length; i++) {
+            Class<?> raw = rawClass(generic[i], bindings);
+            resolved[i] = raw != null ? raw : erased[i];
         }
-        return target != null ? target : method;
+
+        Method found = findMethod(implementation, method.getName(), resolved);
+        return found != null ? found : findMethod(implementation, method.getName(), erased);
     }
 
-    private static boolean overridesErased(Method candidate, Method bridge) {
-        Class<?>[] specific = candidate.getParameterTypes();
-        Class<?>[] erased = bridge.getParameterTypes();
-        if (specific.length != erased.length) return false;
-        for (int i = 0; i < specific.length; i++) {
-            if (!erased[i].isAssignableFrom(specific[i])) return false;
+    /** Records what every type variable in {@code type}'s supertypes is bound to. */
+    private static void collectBindings(Type type, Map<TypeVariable<?>, Type> bindings, Set<Class<?>> seen) {
+        Class<?> raw;
+        if (type instanceof ParameterizedType parameterized) {
+            raw = (Class<?>) parameterized.getRawType();
+            TypeVariable<?>[] variables = raw.getTypeParameters();
+            Type[] arguments = parameterized.getActualTypeArguments();
+            for (int i = 0; i < variables.length; i++) bindings.putIfAbsent(variables[i], arguments[i]);
+        } else if (type instanceof Class<?> c) {
+            raw = c;
+        } else {
+            return;
         }
-        return bridge.getReturnType().isAssignableFrom(candidate.getReturnType());
+        if (!seen.add(raw)) return;
+        if (raw.getGenericSuperclass() != null) collectBindings(raw.getGenericSuperclass(), bindings, seen);
+        for (Type supertype : raw.getGenericInterfaces()) collectBindings(supertype, bindings, seen);
+    }
+
+    /**
+     * The class a type erases to once its variables are resolved, or null if
+     * it cannot be determined (a wildcard). An unbound variable, such as the
+     * implementation's own {@code <X extends Number>}, erases to its bound.
+     */
+    private static Class<?> rawClass(Type type, Map<TypeVariable<?>, Type> bindings) {
+        // Bounded, because a variable can be bound to another variable.
+        for (int hops = 0; type instanceof TypeVariable<?> v && bindings.containsKey(v) && hops < 32; hops++) {
+            type = bindings.get(v);
+        }
+        if (type instanceof Class<?> c) return c;
+        if (type instanceof ParameterizedType parameterized) return (Class<?>) parameterized.getRawType();
+        if (type instanceof GenericArrayType array) {
+            Class<?> component = rawClass(array.getGenericComponentType(), bindings);
+            return component != null ? component.arrayType() : null;
+        }
+        if (type instanceof TypeVariable<?> unbound) return rawClass(unbound.getBounds()[0], bindings);
+        return null;
     }
 
     private static String describe(Class<?>[] parameterTypes) {
