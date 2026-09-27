@@ -39,10 +39,16 @@ final class MethodToggles implements InvocationHandler {
      */
     private record Route(Method method, String key, Method fallback) {}
 
-    /** A method by name and parameter types, the part of a signature an override keeps. */
+    /**
+     * A method by name and parameter types, the part of a signature an
+     * override keeps -- with type variables resolved for the implementation,
+     * so {@code Base<T>.save(T)} and the {@code save(String)} overriding it
+     * in {@code Child extends Base<String>} compare equal, although their
+     * erased parameter types differ.
+     */
     private record Signature(String name, List<Class<?>> parameterTypes) {
-        static Signature of(Method method) {
-            return new Signature(method.getName(), List.of(method.getParameterTypes()));
+        static Signature of(Method method, Map<TypeVariable<?>, Type> bindings) {
+            return new Signature(method.getName(), List.of(resolvedParameterTypes(method, bindings)));
         }
     }
 
@@ -69,6 +75,7 @@ final class MethodToggles implements InvocationHandler {
                     + " the annotations of the object behind it. " + WRAP_FIRST);
         }
         Map<Method, Route> routes = new HashMap<>();
+        Map<TypeVariable<?>, Type> bindings = bindingsOf(implementation);
         Set<Signature> reachable = new HashSet<>();
         boolean toggled = false;
 
@@ -76,10 +83,10 @@ final class MethodToggles implements InvocationHandler {
             if (Modifier.isStatic(method.getModifiers())) continue;
             makeAccessible(method);
 
-            Method original = implementationOf(method, implementation);
-            if (original != null) reachable.add(Signature.of(original));
+            Method original = implementationOf(method, implementation, bindings);
+            if (original != null) reachable.add(Signature.of(original, bindings));
             FeatureToggle toggle = original != null ? original.getAnnotation(FeatureToggle.class) : null;
-            if (original != null && toggle == null) rejectShadowedToggle(original);
+            if (original != null && toggle == null) rejectShadowedToggle(original, bindings);
             if (toggle == null) toggle = method.getAnnotation(FeatureToggle.class);
 
             if (toggle == null) {
@@ -96,7 +103,7 @@ final class MethodToggles implements InvocationHandler {
                     fallbackFor(method, parameterTypes, toggle, implementation)));
         }
 
-        rejectUnreachableToggles(type, implementation, reachable);
+        rejectUnreachableToggles(type, implementation, reachable, bindings);
 
         if (!toggled) return target;
         return type.cast(Proxy.newProxyInstance(
@@ -172,19 +179,20 @@ final class MethodToggles implements InvocationHandler {
      * subclass proxy (Spring CGLIB, Hibernate, ByteBuddy) looks like -- and
      * even if YaFT used the superclass annotation, a fallback would run on the
      * proxy instance, whose fields are empty, instead of on the real object.
+     *
+     * <p>Matched by resolved signature, so {@code save(String)} overriding
+     * {@code Base<T>.save(T)} -- {@code save(Object)} after erasure -- counts.
      */
-    private static void rejectShadowedToggle(Method override) {
+    private static void rejectShadowedToggle(Method override, Map<TypeVariable<?>, Type> bindings) {
+        Signature signature = Signature.of(override, bindings);
         for (Class<?> c = override.getDeclaringClass().getSuperclass(); c != null; c = c.getSuperclass()) {
-            try {
-                Method hidden = c.getDeclaredMethod(override.getName(), override.getParameterTypes());
-                if (hidden.isAnnotationPresent(FeatureToggle.class)) {
-                    throw new IllegalArgumentException("@FeatureToggle on " + c.getName() + "." + hidden.getName()
-                            + " is hidden by " + override.getDeclaringClass().getName() + "." + override.getName()
-                            + ", which overrides it without the annotation. If that class is a generated proxy: "
-                            + WRAP_FIRST + " Otherwise repeat the annotation on the override.");
-                }
-            } catch (NoSuchMethodException e) {
-                // not declared here; keep looking
+            for (Method hidden : c.getDeclaredMethods()) {
+                if (hidden.isBridge() || !hidden.isAnnotationPresent(FeatureToggle.class)) continue;
+                if (!signature.equals(Signature.of(hidden, bindings))) continue;
+                throw new IllegalArgumentException("@FeatureToggle on " + c.getName() + "." + hidden.getName()
+                        + " is hidden by " + override.getDeclaringClass().getName() + "." + override.getName()
+                        + ", which overrides it without the annotation. If that class is a generated proxy: "
+                        + WRAP_FIRST + " Otherwise repeat the annotation on the override.");
             }
         }
     }
@@ -197,13 +205,16 @@ final class MethodToggles implements InvocationHandler {
      * <p>Compared by name <em>and</em> parameter types: an annotated overload
      * that shares only its name with an interface method is just as
      * unreachable. Bridge methods are skipped; javac copies the annotation
-     * onto them, and the method they stand for is the one checked.
+     * onto them, and the method they stand for is the one checked. A
+     * superclass method overridden by a reachable one is reachable too: the
+     * signatures are resolved, so a generic base method matches its override.
      */
-    private static void rejectUnreachableToggles(Class<?> type, Class<?> implementation, Set<Signature> reachable) {
+    private static void rejectUnreachableToggles(
+            Class<?> type, Class<?> implementation, Set<Signature> reachable, Map<TypeVariable<?>, Type> bindings) {
         for (Class<?> c = implementation; c != null && c != Object.class; c = c.getSuperclass()) {
             for (Method method : c.getDeclaredMethods()) {
                 if (method.isBridge() || !method.isAnnotationPresent(FeatureToggle.class)) continue;
-                if (!reachable.contains(Signature.of(method))) {
+                if (!reachable.contains(Signature.of(method, bindings))) {
                     throw new IllegalArgumentException("@FeatureToggle on " + c.getName() + "." + method.getName()
                             + describe(method.getParameterTypes()) + " has no effect: " + type.getName()
                             + " has no such method");
@@ -224,20 +235,32 @@ final class MethodToggles implements InvocationHandler {
      * other overloads the erased types would also fit. Only if that finds
      * nothing is the method looked up by its erased types.
      */
-    private static Method implementationOf(Method method, Class<?> implementation) {
-        Map<TypeVariable<?>, Type> bindings = new HashMap<>();
-        collectBindings(implementation, bindings, new HashSet<>());
+    private static Method implementationOf(
+            Method method, Class<?> implementation, Map<TypeVariable<?>, Type> bindings) {
+        Method found = findMethod(implementation, method.getName(), resolvedParameterTypes(method, bindings));
+        return found != null ? found : findMethod(implementation, method.getName(), method.getParameterTypes());
+    }
 
+    /** {@code method}'s parameter types with type variables resolved; an unresolvable one stays erased. */
+    private static Class<?>[] resolvedParameterTypes(Method method, Map<TypeVariable<?>, Type> bindings) {
         Type[] generic = method.getGenericParameterTypes();
         Class<?>[] erased = method.getParameterTypes();
+        // Defensive: the two can differ in length for compiler-synthesised
+        // members, and then there is nothing to resolve.
+        if (generic.length != erased.length) return erased;
         Class<?>[] resolved = new Class<?>[erased.length];
         for (int i = 0; i < erased.length; i++) {
             Class<?> raw = rawClass(generic[i], bindings);
             resolved[i] = raw != null ? raw : erased[i];
         }
+        return resolved;
+    }
 
-        Method found = findMethod(implementation, method.getName(), resolved);
-        return found != null ? found : findMethod(implementation, method.getName(), erased);
+    /** What every type variable in {@code implementation}'s supertypes is bound to. */
+    private static Map<TypeVariable<?>, Type> bindingsOf(Class<?> implementation) {
+        Map<TypeVariable<?>, Type> bindings = new HashMap<>();
+        collectBindings(implementation, bindings, new HashSet<>());
+        return bindings;
     }
 
     /** Records what every type variable in {@code type}'s supertypes is bound to. */

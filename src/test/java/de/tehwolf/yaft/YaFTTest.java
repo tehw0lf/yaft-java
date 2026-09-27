@@ -217,8 +217,49 @@ class YaFTTest {
         }
     }
 
+    static class GenericBase<T> {
+        @FeatureToggle(key = "store")
+        public String save(T item) {
+            return "base " + item;
+        }
+    }
+
+    /** Overrides save(T) as save(String); the erased base method is save(Object). */
+    static final class ReannotatedGenericChild extends GenericBase<String> implements Store<String> {
+        @Override
+        @FeatureToggle(key = "store")
+        public String save(String item) {
+            return "child " + item;
+        }
+    }
+
+    static final class UnannotatedGenericChild extends GenericBase<String> implements Store<String> {
+        @Override
+        public String save(String item) {
+            return "child " + item;
+        }
+    }
+
     @Nested
     class Wrap {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void acceptsAGenericOverrideThatRepeatsTheAnnotation() {
+            Store<String> store = YaFT.wrap(Store.class, new ReannotatedGenericChild());
+
+            assertNull(store.save("x"));
+            enabled.add("store");
+            assertEquals("child x", store.save("x"));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void rejectsAGenericOverrideThatDropsTheAnnotation() {
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> YaFT.wrap(Store.class, new UnannotatedGenericChild()));
+            assertTrue(error.getMessage().contains("hidden by"), error.getMessage());
+        }
 
         @Test
         @SuppressWarnings("unchecked")
