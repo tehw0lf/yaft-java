@@ -203,6 +203,44 @@ class ApiFeatureProviderTest {
         assertTrue(provider.isEnabled("k"));
     }
 
+    /**
+     * Found in yaft-go's review: a 200 whose body is not a group replaced the
+     * data with nothing, silently, and the recorded hash kept it that way.
+     */
+    @Test
+    void keepsTheDataWhenTheBodyIsNotAGroup() throws Exception {
+        for (String body : List.of("null", "[]", "\"x\"", "{\"error\":\"proxy says no\"}",
+                "{\"toggles\": [null]}", "{\"toggles\": [{}]}", "{\"value\": [{\"Value\": \"true\"}]}")) {
+            serve("h1", "{\"toggles\": [{\"key\": \"k\", \"value\": \"true\"}]}");
+            ApiFeatureProvider provider = provider();
+            provider.refresh();
+
+            serve("h2", body);
+            assertThrows(IOException.class, provider::refresh, body);
+            assertTrue(provider.isEnabled("k"), "previous data replaced by " + body);
+
+            // The hash was not recorded, so a corrected body loads.
+            serve("h2", "{\"toggles\": [{\"key\": \"k\", \"value\": \"false\"}]}");
+            assertTrue(provider.refresh(), body);
+            assertFalse(provider.isEnabled("k"), body);
+        }
+    }
+
+    @Test
+    void acceptsAnEmptyGroupAMixedCollectionAndASingleToggle() throws Exception {
+        serve("h1", "{\"toggles\": []}");
+        ApiFeatureProvider provider = provider();
+        assertTrue(provider.refresh());
+
+        serve("h2", "{\"toggles\": [null, {\"key\": \"%s|kept\", \"value\": \"true\"}]}".formatted(GROUP));
+        assertTrue(provider.refresh());
+        assertTrue(provider.isEnabled("kept"));
+
+        serve("h3", "{\"key\": \"%s|solo\", \"value\": \"true\"}".formatted(GROUP));
+        assertTrue(provider.refresh());
+        assertTrue(provider.isEnabled("solo"));
+    }
+
     @Test
     void retriesAfterAFailedFetchEvenIfTheHashIsUnchanged() throws Exception {
         routes.put("/collectionHash/" + GROUP, new Object[] {200, "{\"collectionHash\":\"h1\"}"});
