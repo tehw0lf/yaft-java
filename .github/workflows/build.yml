@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build_and_publish:
+    uses: tehw0lf/workflows/.github/workflows/build-test-publish.yml@main
+    permissions:
+      id-token: write
+      attestations: write
+      actions: write
+      contents: write
+      packages: write
+      security-events: write
+      # security-scan-source calls npm-audit-autofix, which requests it; a
+      # missing scope is a startup_failure before any job runs.
+      pull-requests: write
+    with:
+      tool: ./gradlew
+      java_version: "25"
+      # test fetches the conformance suite pinned in conformance.lock first.
+      test: check
+      # assemble builds the javadoc jar too, so a doclint error fails here.
+      build_branch: assemble
+      build_main: assemble
+      # Maven Central, via publish-maven-central.yml: every push to main whose
+      # version is not on Central yet is signed, uploaded and released.
+      # maven_central_dry_run: true signs and publishes to Maven Local only.
+      publish_maven_central: true
+    secrets:
+      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
