@@ -39,8 +39,10 @@ class MappingConformanceTest {
                     if (!c.containsKey("held")) {
                         assertEquals(expected, fields(Mapping.normaliseCollection(response)));
                     } else if (c.get("held") instanceof Map<?, ?> held) {
+                        // Present but not a map -- null included -- is rejected,
+                        // not skipped.
                         Object retry = c.get("retry");
-                        if (retry != null && !(retry instanceof Map)) {
+                        if (c.containsKey("retry") && !(retry instanceof Map)) {
                             throw Cases.unsupported("retry", retry, c.get("name"));
                         }
                         refreshOver(held, response, expected, (Map<?, ?>) retry);
