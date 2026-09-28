@@ -1,12 +1,14 @@
 package de.tehwolf.yaft.conformance;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.sun.net.httpserver.HttpServer;
 import de.tehwolf.yaft.ApiFeatureProvider;
 import de.tehwolf.yaft.Feature;
 import de.tehwolf.yaft.LocalBooleanProvider;
 import de.tehwolf.yaft.Mapping;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -45,7 +47,10 @@ class MappingConformanceTest {
                         if (c.containsKey("retry") && !(retry instanceof Map)) {
                             throw Cases.unsupported("retry", retry, c.get("name"));
                         }
-                        refreshOver(held, response, expected, (Map<?, ?>) retry);
+                        if (!(c.get("rejected") instanceof Boolean rejected)) {
+                            throw Cases.unsupported("rejected", c.get("rejected"), c.get("name"));
+                        }
+                        refreshOver(held, response, rejected, expected, (Map<?, ?>) retry);
                     } else {
                         // A held that is not a map must not fall through to a
                         // plain mapping: that would test a different rule.
@@ -68,12 +73,13 @@ class MappingConformanceTest {
     /**
      * Runs a refresh case (R30) through the real API provider against a stub
      * backend: {@code held} is served and loaded first, then {@code response}
-     * under a new hash. A body that is not a group fails the second refresh;
-     * that is expected, and the data it leaves behind is what the case asserts.
+     * under a new hash. The second refresh must throw exactly when the case
+     * says {@code rejected} (R32); the data it leaves behind is asserted next.
      * A {@code retry} is served under the same hash: a port that recorded it
      * on the rejected body would never fetch again.
      */
-    private static void refreshOver(Map<?, ?> held, Object response, Map<?, ?> expected, Map<?, ?> retry)
+    private static void refreshOver(
+            Map<?, ?> held, Object response, boolean rejected, Map<?, ?> expected, Map<?, ?> retry)
             throws Exception {
         AtomicReference<String> hash = new AtomicReference<>("held");
         AtomicReference<Object> features = new AtomicReference<>(Map.of("toggles", held.values()));
@@ -94,11 +100,17 @@ class MappingConformanceTest {
             assertEquals(true, provider.refresh(), "loading held");
             hash.set("response");
             features.set(response);
-            provider.refreshQuietly();
+            // refresh() reports its outcome, so the adapter checks it (R32):
+            // a rejected body throws, an applied group does not.
+            if (rejected) {
+                assertThrows(IOException.class, provider::refresh, "a body the refresh must reject");
+            } else {
+                assertEquals(true, provider.refresh(), "a group the refresh must apply");
+            }
             assertEquals(expected, fields(provider.data()), "after the refresh");
             if (retry != null) {
                 features.set(retry.get("response"));
-                provider.refreshQuietly();
+                assertEquals(true, provider.refresh(), "the retry under the same hash");
                 assertEquals(retry.get("expected"), fields(provider.data()), "after the retry");
             }
         } finally {
