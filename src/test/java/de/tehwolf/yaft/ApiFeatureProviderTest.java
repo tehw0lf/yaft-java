@@ -9,6 +9,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -338,6 +339,25 @@ class ApiFeatureProviderTest {
         for (String bad : List.of("file:///etc/passwd", "ftp://host", "localhost:8080", "https://host/?q=1", "https://host/#f")) {
             assertThrows(
                     IllegalArgumentException.class, () -> ApiFeatureProvider.builder(URI.create(bad), GROUP, DECODE), bad);
+        }
+    }
+
+    @Test
+    void closeReleasesItsOwnClientAndKeepsTheData() throws Exception {
+        serve("h1", "{\"toggles\": [{\"key\": \"k\", \"value\": \"true\"}]}");
+        ApiFeatureProvider provider = provider();
+        provider.refresh();
+
+        provider.close();
+        assertTrue(provider.isEnabled("k"));
+        assertThrows(IOException.class, provider::refresh);
+    }
+
+    @Test
+    void closeLeavesACallersClientOpen() {
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            ApiFeatureProvider.builder(base, GROUP, DECODE).client(client).build().close();
+            assertFalse(client.isTerminated());
         }
     }
 

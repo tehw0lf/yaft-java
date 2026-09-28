@@ -21,14 +21,14 @@ Requires Java 25.
 From Maven Central:
 
 ```kotlin
-implementation("de.tehwolf:yaft:0.2.4")
+implementation("de.tehwolf:yaft:0.2.5")
 ```
 
 ```xml
 <dependency>
   <groupId>de.tehwolf</groupId>
   <artifactId>yaft</artifactId>
-  <version>0.2.4</version>
+  <version>0.2.5</version>
 </dependency>
 ```
 
@@ -99,6 +99,9 @@ scheduler.scheduleWithFixedDelay(provider::refreshQuietly, 30, 30, TimeUnit.SECO
   and `https` are accepted, redirects are not followed, requests time out after
   5 seconds and bodies over 1 MiB are rejected. `timeout`, `maxBodyBytes`,
   `client` and `clock` on the builder change these.
+- The provider is `AutoCloseable`: `close()` releases the HTTP client it
+  created itself, while a client passed to `client(...)` stays open. A
+  long-lived provider need not be closed.
 
 Reading needs no secret. Writing toggles is not part of the library.
 
@@ -161,8 +164,14 @@ Processing processing = YaFT.wrap(Processing.class, new Service());
 
 Off with a `fallbackMethod`: the fallback runs with the same arguments on the
 same instance, so it sees the same fields. It must take the same parameter
-types and return a compatible type. Off without one: the call returns
-nothing.
+types as the annotated method and return a compatible type; for a generic
+interface such as `Store<String>`, that is the implementation's
+`save(String)`, not the erased `save(Object)`. Off without one: the call
+returns nothing.
+
+An annotation the proxy can never reach fails `wrap`, instead of leaving the
+feature on: a helper the interface does not declare, or an overload that only
+shares its name with an interface method.
 
 A toggle may also be declared on the interface method itself.
 

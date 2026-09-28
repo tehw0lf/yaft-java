@@ -42,7 +42,11 @@ trap 'rm -rf "$tmp"' EXIT
 
 url="https://github.com/${REPO}/releases/download/${version}/cases.tar.gz"
 echo "fetching conformance suite ${version}"
-curl --fail --location --silent --show-error --output "$tmp/cases.tar.gz" "$url"
+# Bounded: the archive is a few kilobytes, and a stalled transfer would
+# otherwise hang ./gradlew test with no message.
+curl --fail --location --silent --show-error \
+  --connect-timeout 15 --max-time 120 \
+  --output "$tmp/cases.tar.gz" "$url"
 
 # sha256sum is GNU coreutils and is not present on macOS; shasum ships with
 # both. Preferring sha256sum keeps Linux CI on the faster binary.

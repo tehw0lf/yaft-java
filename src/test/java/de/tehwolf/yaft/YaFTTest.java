@@ -170,8 +170,128 @@ class YaFTTest {
         }
     }
 
+    interface Store<T> {
+        String save(T item);
+    }
+
+    static final class ToggledStore implements Store<String> {
+        @Override
+        @FeatureToggle(key = "store", fallbackMethod = "saveOld")
+        public String save(String item) {
+            return "new " + item;
+        }
+
+        private String saveOld(String item) {
+            return "old " + item;
+        }
+    }
+
+    static class StoreBase {
+        @FeatureToggle(key = "store", fallbackMethod = "saveOld")
+        public String save(String item) {
+            return "new " + item;
+        }
+
+        String saveOld(String item) {
+            return "old " + item;
+        }
+    }
+
+    /** Declares only the bridge save(Object); save(String) is inherited. */
+    static final class InheritedStore extends StoreBase implements Store<String> {}
+
+    static final class OverloadedStore implements Store<String> {
+        @Override
+        @FeatureToggle(key = "store", fallbackMethod = "saveOld")
+        public String save(String item) {
+            return "new " + item;
+        }
+
+        /** Also fits the erased save(Object), but is not what the bridge calls. */
+        public String save(Integer item) {
+            return "int " + item;
+        }
+
+        private String saveOld(String item) {
+            return "old " + item;
+        }
+    }
+
+    static class GenericBase<T> {
+        @FeatureToggle(key = "store")
+        public String save(T item) {
+            return "base " + item;
+        }
+    }
+
+    /** Overrides save(T) as save(String); the erased base method is save(Object). */
+    static final class ReannotatedGenericChild extends GenericBase<String> implements Store<String> {
+        @Override
+        @FeatureToggle(key = "store")
+        public String save(String item) {
+            return "child " + item;
+        }
+    }
+
+    static final class UnannotatedGenericChild extends GenericBase<String> implements Store<String> {
+        @Override
+        public String save(String item) {
+            return "child " + item;
+        }
+    }
+
     @Nested
     class Wrap {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void acceptsAGenericOverrideThatRepeatsTheAnnotation() {
+            Store<String> store = YaFT.wrap(Store.class, new ReannotatedGenericChild());
+
+            assertNull(store.save("x"));
+            enabled.add("store");
+            assertEquals("child x", store.save("x"));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void rejectsAGenericOverrideThatDropsTheAnnotation() {
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> YaFT.wrap(Store.class, new UnannotatedGenericChild()));
+            assertTrue(error.getMessage().contains("hidden by"), error.getMessage());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void resolvesAGenericMethodInheritedFromASuperclass() {
+            Store<String> store = YaFT.wrap(Store.class, new InheritedStore());
+
+            assertEquals("old x", store.save("x"));
+            enabled.add("store");
+            assertEquals("new x", store.save("x"));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void resolvesAGenericMethodNextToAnOverloadTheErasureAlsoFits() {
+            Store<String> store = YaFT.wrap(Store.class, new OverloadedStore());
+
+            assertEquals("old x", store.save("x"));
+            enabled.add("store");
+            assertEquals("new x", store.save("x"));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void findsTheFallbackOfAGenericMethodByTheImplementationsParameterTypes() {
+            // The interface method is save(Object) after erasure; the fallback
+            // is written against the implementation's save(String).
+            Store<String> store = YaFT.wrap(Store.class, new ToggledStore());
+
+            assertEquals("old x", store.save("x"));
+            enabled.add("store");
+            assertEquals("new x", store.save("x"));
+        }
 
         @Test
         void callsAPrivateFallbackOnTheSameInstance() {
@@ -343,6 +463,18 @@ class YaFTTest {
             }
         }
 
+        static final class UnreachableOverload implements Plain {
+            @Override
+            public String run(String input) {
+                return input;
+            }
+
+            @FeatureToggle(key = "k")
+            String run(int input) {
+                return Integer.toString(input);
+            }
+        }
+
         @FeatureToggle(key = "k", fallbackMethod = "other")
         static final class MethodFallbackOnClass implements Plain {
             public String run(String input) {
@@ -405,6 +537,13 @@ class YaFTTest {
         }
 
         @Test
+        void aToggledOverloadTheInterfaceDoesNotHave() {
+            // Same name as an interface method, other parameters: the proxy
+            // never routes to it, so it is as unreachable as a helper.
+            assertRejected(() -> YaFT.wrap(Plain.class, new UnreachableOverload()), "has no effect");
+        }
+
+        @Test
         void aMethodFallbackOnAClass() {
             assertRejected(() -> YaFT.decorate(Plain.class, MethodFallbackOnClass.class), "use fallback");
         }
@@ -446,6 +585,23 @@ class YaFTTest {
         @Test
         void aToggleHiddenByAnOverrideAsInASubclassProxy() {
             assertRejected(() -> YaFT.wrap(Plain.class, new ProxiedLikeCglib()), "hidden by");
+        }
+
+        static final class Reannotated extends ToggledPlain {
+            @Override
+            @FeatureToggle(key = "k")
+            public String run(String input) {
+                return "sub " + input;
+            }
+        }
+
+        @Test
+        void acceptsAnOverrideThatRepeatsTheAnnotation() {
+            // The superclass method is annotated and not the one the proxy
+            // calls, but it is overridden, not unreachable.
+            Plain plain = YaFT.wrap(Plain.class, new Reannotated());
+            enabled.add("k");
+            assertEquals("sub x", plain.run("x"));
         }
 
         @Test
