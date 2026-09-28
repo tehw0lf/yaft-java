@@ -36,10 +36,18 @@ class MappingConformanceTest {
 
             switch ((String) c.get("shape")) {
                 case "feature" -> {
-                    if (c.get("held") instanceof Map<?, ?> held) {
-                        refreshOver(held, response, expected, (Map<?, ?>) c.get("retry"));
-                    } else {
+                    if (!c.containsKey("held")) {
                         assertEquals(expected, fields(Mapping.normaliseCollection(response)));
+                    } else if (c.get("held") instanceof Map<?, ?> held) {
+                        Object retry = c.get("retry");
+                        if (retry != null && !(retry instanceof Map)) {
+                            throw Cases.unsupported("retry", retry, c.get("name"));
+                        }
+                        refreshOver(held, response, expected, (Map<?, ?>) retry);
+                    } else {
+                        // A held that is not a map must not fall through to a
+                        // plain mapping: that would test a different rule.
+                        throw Cases.unsupported("held", c.get("held"), c.get("name"));
                     }
                 }
                 case "boolean" -> {
