@@ -27,7 +27,7 @@ final class Cases {
      * other format may carry a field this adapter never reads, which would
      * leave a rule silently unenforced, so it is rejected instead.
      */
-    private static final Map<String, Integer> FORMATS = Map.of("evaluation", 1, "decorator", 1, "mapping", 2);
+    private static final Map<String, Integer> FORMATS = Map.of("evaluation", 1, "decorator", 1, "mapping", 3);
 
     private Cases() {}
 
