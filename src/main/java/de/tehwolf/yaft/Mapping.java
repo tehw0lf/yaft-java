@@ -36,8 +36,8 @@ public final class Mapping {
         return new Feature(
                 text(field(raw, "key", "Key")),
                 text(field(raw, "value", "Value")),
-                date(field(raw, "activeAt", "ActiveAt")),
-                date(field(raw, "disabledAt", "DisabledAt")),
+                text(field(raw, "activeAt", "ActiveAt")),
+                text(field(raw, "disabledAt", "DisabledAt")),
                 // Filtered rather than cast: a backend sending a mixed array
                 // would otherwise hand callers a non-string through a
                 // List<String>.
@@ -107,12 +107,14 @@ public final class Mapping {
         return null;
     }
 
+    /**
+     * A string field, or {@code ""} for anything that is not a string (R33). Key and
+     * value are strings, and JSON booleans belong in the boolean shape: {@code toString()}
+     * would turn {@code "value": true} into {@code "true"} and the feature on, and a number
+     * key into {@code "7"} or {@code "7.0"} depending on the JSON library. The backend sends
+     * {@code null} for an unset bound, fixtures use {@code ""}; both mean none (R24).
+     */
     private static String text(Object value) {
-        return value == null ? "" : value.toString();
-    }
-
-    /** The backend sends {@code null} for an unset bound, fixtures use {@code ""}; both mean none (R24). */
-    private static String date(Object value) {
         return value instanceof String s ? s : "";
     }
 }
