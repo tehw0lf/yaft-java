@@ -19,6 +19,9 @@ jobs:
       # security-scan-source calls npm-audit-autofix, which requests it; a
       # missing scope is a startup_failure before any job runs.
       pull-requests: write
+      # security-scan-source declares it for its failure issue job; the grant is
+      # needed whatever open_failure_issue is set to.
+      issues: write
     with:
       tool: ./gradlew
       java_version: "25"
